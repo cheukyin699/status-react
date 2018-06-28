@@ -1,3 +1,5 @@
+from _pytest.outcomes import Failed
+from decimal import Decimal as d
 from selenium.common.exceptions import TimeoutException
 
 from tests import marks, transaction_users, common_password
@@ -10,6 +12,7 @@ from views.sign_in_view import SignInView
 class TestCommands(MultipleDeviceTestCase):
 
     @marks.testrail_case_id(3742)
+    @marks.testrail_id(3697)
     def test_network_mismatch_for_send_request_commands(self):
         sender = self.senders['d_user'] = transaction_users['D_USER']
         self.create_drivers(2)
@@ -59,5 +62,75 @@ class TestCommands(MultipleDeviceTestCase):
                 self.errors.append("Request funds message doesn't contain text 'Transaction Request'")
         except TimeoutException:
             self.errors.append('Request funds message was not received')
+
+        self.verify_no_errors()
+
+    @marks.testrail_id(765)
+    def test_send_eth_in_1_1_chat(self):
+        recipient = transaction_users['D_USER']
+        sender = self.senders['c_user'] = transaction_users['C_USER']
+        self.create_drivers(2)
+        device_1, device_2 = SignInView(self.drivers[0]), SignInView(self.drivers[1])
+        home_1 = device_1.recover_access(passphrase=sender['passphrase'], password=sender['password'])
+        home_2 = device_2.recover_access(passphrase=recipient['passphrase'], password=recipient['password'])
+        wallet_1, wallet_2 = home_1.wallet_button.click(), home_2.wallet_button.click()
+        wallet_1.set_up_wallet()
+        wallet_1.home_button.click()
+        wallet_2.set_up_wallet()
+        init_balance = wallet_2.get_eth_value()
+        wallet_2.home_button.click()
+
+        chat_1 = home_1.add_contact(recipient['public_key'])
+        amount = chat_1.get_unique_amount()
+        chat_1.commands_button.click()
+        chat_1.send_command.click()
+        chat_1.eth_asset.click()
+        chat_1.send_as_keyevent(amount)
+        send_transaction_view = chat_1.get_send_transaction_view()
+        chat_1.send_message_button.click_until_presence_of_element(send_transaction_view.sign_transaction_button)
+
+        send_transaction_view.chose_recipient_button.find_element().click()
+        if send_transaction_view.recent_recipients_button.is_element_displayed():
+            self.errors.append('Recipient field is editable')
+            send_transaction_view.click_system_back_button()
+
+        send_transaction_view.select_asset_button.click()
+        if not send_transaction_view.chose_recipient_button.is_element_displayed():
+            self.errors.append('Asset field is editable')
+            send_transaction_view.back_button.click()
+
+        if send_transaction_view.amount_edit_box.is_element_displayed():
+            self.errors.append('Amount field is editable')
+
+        send_transaction_view.advanced_button.click()
+        send_transaction_view.transaction_fee_button.click()
+        gas_limit = '25000'
+        send_transaction_view.gas_limit_input.clear()
+        send_transaction_view.gas_limit_input.set_value(gas_limit)
+        gas_price = '1'
+        send_transaction_view.gas_price_input.clear()
+        send_transaction_view.gas_price_input.set_value(gas_price)
+        send_transaction_view.total_fee_input.click()
+        if send_transaction_view.total_fee_input.text != '%s ETH' % (d(gas_limit) * d(gas_price) / d(1000000000)):
+            self.errors.append('Gas limit and/or gas price fields were not edited')
+        send_transaction_view.done_button.click()
+        send_transaction_view.sign_transaction(sender['password'])
+
+        if not chat_1.chat_element_by_text(amount).is_element_displayed():
+            self.errors.append('Message with the sent amount is not shown for the sender')
+        chat_2 = home_2.get_chat_with_user(sender['username']).click()
+        if not chat_2.chat_element_by_text(amount).is_element_displayed():
+            self.errors.append('Message with the sent amount is not shown for the recipient')
+
+        chat_2.get_back_to_home_view()
+        home_2.wallet_button.click()
+        try:
+            wallet_2.wait_balance_changed_on_wallet_screen(expected_balance=init_balance + float(amount))
+        except Failed as e:
+            self.errors.append(e.msg)
+
+        balance = self.network_api.get_balance(recipient['address'])
+        if d(balance) != d(init_balance + float(amount) * 1000000000000000000):
+            self.errors.append('Recipients balance is not updated on etherscan')
 
         self.verify_no_errors()

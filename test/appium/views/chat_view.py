@@ -51,19 +51,6 @@ class EthAsset(BaseButton):
         self.locator = self.Locator.text_selector('ETH')
 
 
-class FaucetCommand(BaseButton):
-    def __init__(self, driver):
-        super(FaucetCommand, self).__init__(driver)
-        self.locator = self.Locator.xpath_selector(
-            "//*[contains(@text,'Get some ETH')]/preceding-sibling::*[@text='/faucet']")
-
-
-class FaucetSendCommand(BaseButton):
-    def __init__(self, driver):
-        super(FaucetSendCommand, self).__init__(driver)
-        self.locator = self.Locator.xpath_selector("//*[@text='Status Testnet Faucet']")
-
-
 class ChatMenuButton(BaseButton):
     def __init__(self, driver):
         super(ChatMenuButton, self).__init__(driver)
@@ -134,13 +121,6 @@ class FirstRecipient(BaseButton):
     def __init__(self, driver):
         super(FirstRecipient, self).__init__(driver)
         self.locator = self.Locator.accessibility_id('contact-item')
-
-
-class UsernameByMessage(BaseText):
-    def __init__(self, driver, message):
-        super(UsernameByMessage, self).__init__(driver)
-        self.locator = self.Locator.xpath_selector(
-            "//*[@content-desc='chat-item']//*[contains(@text, '%s')]/../../android.widget.TextView" % message)
 
 
 class MoreUsersButton(BaseButton):
@@ -222,9 +202,18 @@ class ChatElementByText(BaseText):
 
     def contains_text(self, text) -> bool:
         element = BaseText(self.driver)
-        element.locator = element.Locator.xpath_selector("//android.view.ViewGroup//android.widget.TextView[@text='%s']"
-                                                         % text)
+        element.locator = element.Locator.xpath_selector(
+            self.locator.value + "//android.view.ViewGroup//android.widget.TextView[@text='%s']" % text)
         return element.is_element_displayed()
+
+    @property
+    def username(self):
+        class Username(BaseText):
+            def __init__(self, driver, parent_locator):
+                super(Username, self).__init__(driver)
+                self.locator = self.Locator.xpath_selector(parent_locator + "/*[1][name()='android.widget.TextView']")
+
+        return Username(self.driver, self.locator.value)
 
 
 class ChatView(BaseView):
@@ -240,8 +229,6 @@ class ChatView(BaseView):
         self.send_command = SendCommand(self.driver)
         self.request_command = RequestCommand(self.driver)
         self.eth_asset = EthAsset(self.driver)
-        self.faucet_command = FaucetCommand(self.driver)
-        self.faucet_send_command = FaucetSendCommand(self.driver)
 
         self.chat_options = ChatMenuButton(self.driver)
         self.members_button = MembersButton(self.driver)
@@ -297,15 +284,6 @@ class ChatView(BaseView):
         if set(expected_messages) - set(received_messages):
             errors.append('Not received messages from user %s: "%s"' % (username, ', '.join(
                 [i for i in list(set(expected_messages) - set(received_messages))])))
-
-    def verify_username_is_shown_per_message(self, username: str, messages: str, errors: list):
-        messages = messages if type(messages) == list else [messages]
-        for message in messages:
-            elements = UsernameByMessage(self.driver, message).find_elements()
-            for element in elements:
-                if not element.text == username:
-                    errors.append("Message '%s' was received but username is '%s' instead of %s" %
-                                  (message, element.text, username))
 
     def send_eth_to_request(self, amount, sender_password, wallet_set_up=False):
         gas_popup = self.element_by_text_part('Specify amount')
